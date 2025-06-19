@@ -1,0 +1,1365 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CO2 Emission data visualization dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+        }
+        
+        .dashboard {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: auto 1fr 1fr auto;
+            gap: 20px;
+            padding: 20px;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+        
+        .header {
+            grid-column: 1 / -1;
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .chart-container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .chart-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #2c3e50;
+        }
+        
+        .controls {
+            grid-column: 1 / -1;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 20px;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .control-label {
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .slider {
+            width: 300px;
+        }
+        
+        .toggle-group {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .toggle-btn {
+            padding: 8px 16px;
+            border: 2px solid #3498db;
+            background: white;
+            color: #3498db;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .toggle-btn.active {
+            background: #3498db;
+            color: white;
+        }
+        
+        .tooltip {
+            position: absolute;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            border-radius: 4px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+            font-size: 14px;
+            z-index: 1000;
+        }
+        
+        .country-path {
+            stroke: #fff;
+            stroke-width: 0.5;
+            cursor: pointer;
+            transition: opacity 0.3s;
+        }
+        
+        .country-path:hover {
+            stroke-width: 1.5;
+            stroke: #333;
+        }
+        
+        .bubble {
+            fill: rgba(52, 152, 219, 0.6);
+            stroke: #2980b9;
+            stroke-width: 1;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .bubble:hover {
+            fill: rgba(41, 128, 185, 0.8);
+        }
+        
+        .scatter-dot {
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .scatter-dot:hover {
+            r: 8;
+        }
+        
+        .bar {
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .bar:hover {
+            opacity: 0.8;
+        }
+        
+        .regression-line {
+            fill: none;
+            stroke: #e74c3c;
+            stroke-width: 2;
+            stroke-dasharray: 5,5;
+        }
+        
+        .axis {
+            font-size: 12px;
+        }
+        
+        .axis-label {
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .legend {
+            font-size: 12px;
+        }
+        
+        .highlighted {
+            opacity: 1 !important;
+            stroke-width: 2 !important;
+            stroke: #e74c3c !important;
+        }
+        
+        .dimmed {
+            opacity: 0.2 !important;
+        }
+        
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 18px;
+            color: #666;
+        }
+        
+        #year-display {
+            font-size: 18px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <div class="header">
+            <h1>Global CO2 emissions and economic development relationship analysis dashboard</h1>
+            <p>Explore the relationship between CO2 emissions and economic development level</p>
+        </div>
+        
+        <div class="chart-container" id="map-container">
+            <div class="chart-title">World map-CO2 Emission distribution</div>
+            <div class="loading">Loading world map...</div>
+        </div>
+        
+        <div class="chart-container" id="scatter-container">
+            <div class="chart-title">Scatter plot--GDP per capita vs CO2 emissions per capita</div>
+        </div>
+        
+        <div class="chart-container" id="bar-container">
+            <div class="chart-title">Bar chart-CO2 Top 10 countries before emissions</div>
+        </div>
+        
+        <div class="chart-container" id="box-container">
+            <div class="chart-title">Box plot--per capita emissions in developed vs. developing countries</div>
+        </div>
+        
+        <div class="controls">
+            <div class="control-group">
+                <div class="control-label">Year choose</div>
+                <input type="range" class="slider" id="year-slider" min="1990" max="2021" value="2021" step="1">
+                <div id="year-display">2021</div>
+            </div>
+            
+            <div class="control-group">
+                <div class="control-label">Country type</div>
+                <div class="toggle-group">
+                    <button class="toggle-btn active" data-filter="all">all</button>
+                    <button class="toggle-btn" data-filter="developed"> developed countries </button>
+                    <button class="toggle-btn" data-filter="developing"> developing countries </button>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <div class="control-label">Indicator type</div>
+                <div class="toggle-group">
+                    <button class="toggle-btn active" data-metric="total">total</button>
+                    <button class="toggle-btn" data-metric="percapita"> per capita </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="tooltip"></div>
+    
+    <script>
+        // global variable
+        let data = [];
+        let worldData = null;
+        let currentYear = 2021;
+        let countryFilter = 'all';
+        let metricType = 'total';
+        let selectedCountries = new Set();
+        
+        // developed country list
+        const developedCountries = new Set([
+            'United States', 'Canada', 'United Kingdom', 'Germany', 'France', 'Italy', 'Spain',
+            'Japan', 'South Korea', 'Australia', 'New Zealand', 'Norway', 'Sweden', 'Denmark',
+            'Finland', 'Netherlands', 'Belgium', 'Switzerland', 'Austria', 'Ireland', 'Luxembourg',
+            'Iceland', 'Israel', 'Singapore', 'Portugal', 'Greece', 'Czech Republic', 'Slovenia',
+            'Estonia', 'Slovakia', 'Lithuania', 'Latvia', 'Poland', 'Hungary', 'Croatia'
+        ]);
+        
+        // 
+        async function loadData() {
+            try {
+                // 
+                const response = await fetch('owid-co2-data.csv');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const csvText = await response.text();
+                console.log('CSV loaded');
+                
+                const parsed = Papa.parse(csvText, {
+                    header: true,
+                    dynamicTyping: true,
+                    skipEmptyLines: true
+                });
+                
+                if (parsed.errors.length > 0) {
+                    console.warn('CSV warning:', parsed.errors);
+                }
+                
+                data = parsed.data;
+                console.log('CSV loaded, row number:', data.length);
+                
+                // 
+                try {
+                    const mapResponse = await fetch('world-110m.json');
+                    if (!mapResponse.ok) {
+                        throw new Error(`fail to load world map! status: ${mapResponse.status}`);
+                    }
+                    worldData = await mapResponse.json();
+                    console.log('map data loaded');
+                    
+                    // 
+                    if (!worldData || !worldData.objects || !worldData.objects.countries) {
+                        console.warn('wrong map data structure');
+                        worldData = null;
+                    }
+                } catch (mapError) {
+                    console.warn('cannot load worldmap:', mapError);
+                    worldData = null;
+                    // 
+                }
+                
+                // 
+                initializeVisualizations();
+            } catch (error) {
+                console.error('fail to load:', error);
+                document.querySelector('.loading').textContent = 'fail to load data：' + error.message;
+            }
+        }
+        
+        // 
+        function initializeVisualizations() {
+            // 
+            d3.selectAll('.loading').remove();
+            
+            // 
+            createWorldMap();
+            createScatterPlot();
+            createBarChart();
+            createBoxPlot();
+            
+            // 
+            bindControls();
+            
+            // 
+            updateAllCharts();
+        }
+        
+        // 
+        function createWorldMap() {
+            const container = d3.select('#map-container');
+            const width = container.node().getBoundingClientRect().width - 40;
+            const height = 400;
+            
+            const svg = container.append('svg')
+                .attr('width', width)
+                .attr('height', height);
+            
+            const g = svg.append('g');
+            
+            // 
+            if (worldData) {
+                const projection = d3.geoNaturalEarth1()
+                    .scale(width / 6.5)
+                    .translate([width / 2, height / 2]);
+                
+                const path = d3.geoPath().projection(projection);
+                
+                // 
+                const zoom = d3.zoom()
+                    .scaleExtent([1, 8])
+                    .on('zoom', (event) => {
+                        g.attr('transform', event.transform);
+                    });
+                
+                svg.call(zoom);
+                
+                // 
+                const node = container.node();
+                node.projection = projection;
+                node.path       = path;
+            }
+            
+            // 
+            container.property('svg', svg);
+            container.property('g', g);
+        }
+        
+        // 
+        function createScatterPlot() {
+            const container = d3.select('#scatter-container');
+            const width = container.node().getBoundingClientRect().width - 40;
+            const height = 400;
+            const margin = {top: 20, right: 80, bottom: 60, left: 80};
+            
+            const svg = container.append('svg')
+                .attr('width', width)
+                .attr('height', height);
+            
+            const g = svg.append('g')
+                .attr('transform', `translate(${margin.left},${margin.top})`);
+            
+            // 
+            g.append('g')
+                .attr('class', 'x-axis axis')
+                .attr('transform', `translate(0,${height - margin.top - margin.bottom})`);
+            
+            // 
+            g.append('g')
+                .attr('class', 'y-axis axis');
+            
+            // 
+            g.append('text')
+                .attr('class', 'x-axis-label axis-label')
+                .attr('x', (width - margin.left - margin.right) / 2)
+                .attr('y', height - margin.top - margin.bottom + 50)
+                .style('text-anchor', 'middle')
+                .text('Per capita GDP (USD)');
+            
+            // 
+            g.append('text')
+                .attr('class', 'y-axis-label axis-label')
+                .attr('transform', 'rotate(-90)')
+                .attr('x', -(height - margin.top - margin.bottom) / 2)
+                .attr('y', -60)
+                .style('text-anchor', 'middle')
+                .text('Per capita CO2 emissions (tonnes)');
+            
+            // 
+            container.property('svg', svg);
+            container.property('g', g);
+            container.property('margin', margin);
+        }
+        
+        // 
+        function createBarChart() {
+            const container = d3.select('#bar-container');
+            const width = container.node().getBoundingClientRect().width - 40;
+            const height = 400;
+            const margin = {top: 20, right: 80, bottom: 100, left: 80};
+            
+            const svg = container.append('svg')
+                .attr('width', width)
+                .attr('height', height);
+            
+            const g = svg.append('g')
+                .attr('transform', `translate(${margin.left},${margin.top})`);
+            
+            // 
+            g.append('g')
+                .attr('class', 'x-axis axis')
+                .attr('transform', `translate(0,${height - margin.top - margin.bottom})`);
+            
+            // 
+            g.append('g')
+                .attr('class', 'y-axis-left axis');
+            
+            // 
+            g.append('g')
+                .attr('class', 'y-axis-right axis')
+                .attr('transform', `translate(${width - margin.left - margin.right},0)`);
+            
+            // 
+            g.append('text')
+                .attr('class', 'y-axis-label axis-label')
+                .attr('transform', 'rotate(-90)')
+                .attr('x', -(height - margin.top - margin.bottom) / 2)
+                .attr('y', -60)
+                .style('text-anchor', 'middle')
+                .text('CO2 Emissions (million tons)');
+            
+            // 
+            g.append('text')
+                .attr('class', 'y-axis-label axis-label')
+                .attr('transform', 'rotate(90)')
+                .attr('x', (height - margin.top - margin.bottom) / 2)
+                .attr('y', -(width - margin.left - margin.right + 60))
+                .style('text-anchor', 'middle')
+                .text('GDP ranking');
+            
+            // 
+            container.property('svg', svg);
+            container.property('g', g);
+            container.property('margin', margin);
+        }
+        
+        // 
+        function createBoxPlot() {
+            const container = d3.select('#box-container');
+            const width = container.node().getBoundingClientRect().width - 40;
+            const height = 400;
+            const margin = {top: 20, right: 40, bottom: 60, left: 80};
+            
+            const svg = container.append('svg')
+                .attr('width', width)
+                .attr('height', height);
+            
+            const g = svg.append('g')
+                .attr('transform', `translate(${margin.left},${margin.top})`);
+            
+            // 
+            g.append('g')
+                .attr('class', 'x-axis axis')
+                .attr('transform', `translate(0,${height - margin.top - margin.bottom})`);
+            
+            // 
+            g.append('g')
+                .attr('class', 'y-axis axis');
+            
+            // 
+            g.append('text')
+                .attr('class', 'y-axis-label axis-label')
+                .attr('transform', 'rotate(-90)')
+                .attr('x', -(height - margin.top - margin.bottom) / 2)
+                .attr('y', -60)
+                .style('text-anchor', 'middle')
+                .text('Per capita CO2 emissions (tonnes)');
+            
+            // 
+            container.property('svg', svg);
+            container.property('g', g);
+            container.property('margin', margin);
+        }
+        
+        // 
+        function getFilteredData() {
+            let filtered = data.filter(d => 
+                d.year === currentYear && 
+                d.co2 !== null && 
+                d.gdp !== null && 
+                d.population !== null &&
+                d.co2 > 0 &&
+                d.gdp > 0 &&
+                d.population > 0
+            );
+            
+            // 
+            filtered.forEach(d => {
+                d.isDeveloped = developedCountries.has(d.country);
+            });
+            
+            //
+            if (countryFilter === 'developed') {
+                filtered = filtered.filter(d => d.isDeveloped);
+            } else if (countryFilter === 'developing') {
+                filtered = filtered.filter(d => !d.isDeveloped);
+            }
+            
+            return filtered;
+        }
+        
+        // 
+        function updateWorldMap() {
+            const container  = d3.select('#map-container');
+            const svg = container.property('svg');
+            const g   = container.property('g');
+            if (!svg || !g) {
+                console.warn('World-map SVG or <g> not ready yet');
+                return;
+            }
+            const node       = container.node();
+            const projection = node.projection;
+            const path       = node.path;
+            
+            const yearData = getFilteredData();
+            const dataMap = new Map(yearData.map(d => [d.country, d]));
+            
+            //
+            if (!worldData) {
+                // 
+                g.selectAll('*').remove();
+                
+                // 
+                const width = svg.attr('width');
+                const height = svg.attr('height');
+                
+                // 
+                g.append('text')
+                    .attr('x', width / 2)
+                    .attr('y', height / 2)
+                    .attr('text-anchor', 'middle')
+                    .style('font-size', '16px')
+                    .style('fill', '#666')
+                    .text('fail to load worldmap data');
+                
+                // 
+                const top20 = yearData
+                    .sort((a, b) => b.co2 - a.co2)
+                    .slice(0, 20);
+                
+                const rowHeight = 20;
+                const startY = 60;
+                
+                // 
+                g.append('text')
+                    .attr('x', 50)
+                    .attr('y', startY - 10)
+                    .style('font-weight', 'bold')
+                    .text('country');
+                
+                g.append('text')
+                    .attr('x', 200)
+                    .attr('y', startY - 10)
+                    .style('font-weight', 'bold')
+                    .text('CO2 Emission (Mt)');
+                
+                g.append('text')
+                    .attr('x', 350)
+                    .attr('y', startY - 10)
+                    .style('font-weight', 'bold')
+                    .text('CO2 per capita (t)');
+                
+                // 
+                top20.forEach((d, i) => {
+                    const y = startY + i * rowHeight;
+                    
+                    g.append('text')
+                        .attr('x', 50)
+                        .attr('y', y)
+                        .style('font-size', '12px')
+                        .text(d.country);
+                    
+                    g.append('text')
+                        .attr('x', 200)
+                        .attr('y', y)
+                        .style('font-size', '12px')
+                        .text(d.co2.toFixed(2));
+                    
+                    g.append('text')
+                        .attr('x', 350)
+                        .attr('y', y)
+                        .style('font-size', '12px')
+                        .text(d.co2_per_capita.toFixed(2));
+                });
+                
+                return;
+            }
+            
+            // 
+            const colorScale = d3.scaleSequential(d3.interpolateOrRd)
+                .domain([0, d3.max(yearData, d => metricType === 'total' ? d.co2 : d.co2_per_capita)]);
+            
+            // 
+            const sizeScale = d3.scaleSqrt()
+                .domain([0, d3.max(yearData, d => metricType === 'total' ? d.gdp : d.gdp / d.population)])
+                .range([0, 30]);
+            
+            // 
+            if (worldData && worldData.objects && worldData.objects.countries) {
+                const countries = topojson.feature(worldData, worldData.objects.countries);
+                
+                const countryPaths = g.selectAll('.country-path')
+                    .data(countries.features);
+                
+                countryPaths.enter()
+                    .append('path')
+                    .attr('class', 'country-path')
+                    .merge(countryPaths)
+                    .attr('d', path)
+                    .attr('fill', d => {
+                        const countryData = dataMap.get(d.properties.name);
+                        if (countryData) {
+                            return colorScale(metricType === 'total' ? countryData.co2 : countryData.co2_per_capita);
+                        }
+                        return '#ccc';
+                    })
+                    .classed('highlighted', d => selectedCountries.has(d.properties.name))
+                    .classed('dimmed', d => selectedCountries.size > 0 && !selectedCountries.has(d.properties.name))
+                    .on('mouseover', function(event, d) {
+                        const countryData = dataMap.get(d.properties.name);
+                        if (countryData) {
+                            showTooltip(event, `
+                                <strong>${countryData.country}</strong><br>
+                                CO2 Emission: ${countryData.co2.toFixed(2)} Mt<br>
+                                Per capita CO2: ${countryData.co2_per_capita.toFixed(2)} t<br>
+                                GDP: ${(countryData.gdp / 1e9).toFixed(2)} B$<br>
+                                Per capita GDP: ${(countryData.gdp / countryData.population).toFixed(2)} $
+                            `);
+                        }
+                    })
+                    .on('mouseout', hideTooltip)
+                    .on('click', function(event, d) {
+                        const countryData = dataMap.get(d.properties.name);
+                        if (countryData) {
+                            toggleCountrySelection(countryData.country);
+                        }
+                    });
+            } else {
+                // 
+                g.selectAll('*').remove();
+                
+                const width = svg.attr('width');
+                const height = svg.attr('height');
+                
+                // 
+                g.append('text')
+                    .attr('x', width / 2)
+                    .attr('y', height / 2)
+                    .attr('text-anchor', 'middle')
+                    .style('font-size', '16px')
+                    .style('fill', '#666')
+                    .text('fail to load worldmap data');
+                
+                // 
+                const top20 = yearData
+                    .sort((a, b) => b.co2 - a.co2)
+                    .slice(0, 20);
+                
+                const rowHeight = 20;
+                const startY = 60;
+                
+                // 
+                g.append('text')
+                    .attr('x', 50)
+                    .attr('y', startY - 10)
+                    .style('font-weight', 'bold')
+                    .text('country');
+                
+                g.append('text')
+                    .attr('x', 200)
+                    .attr('y', startY - 10)
+                    .style('font-weight', 'bold')
+                    .text('CO2 Emission (Mt)');
+                
+                g.append('text')
+                    .attr('x', 350)
+                    .attr('y', startY - 10)
+                    .style('font-weight', 'bold')
+                    .text('Per capita CO2 (t)');
+                
+                // 
+                top20.forEach((d, i) => {
+                    const y = startY + i * rowHeight;
+                    
+                    g.append('text')
+                        .attr('x', 50)
+                        .attr('y', y)
+                        .style('font-size', '12px')
+                        .text(d.country);
+                    
+                    g.append('text')
+                        .attr('x', 200)
+                        .attr('y', y)
+                        .style('font-size', '12px')
+                        .text(d.co2.toFixed(2));
+                    
+                    g.append('text')
+                        .attr('x', 350)
+                        .attr('y', y)
+                        .style('font-size', '12px')
+                        .text(d.co2_per_capita.toFixed(2));
+                });
+                
+                return;
+            }
+            
+            // 
+            if (worldData && projection && path) {
+                const bubbles = g.selectAll('.bubble')
+                    .data(yearData.filter(d => d.iso_code)); // 
+                
+                bubbles.enter()
+                    .append('circle')
+                    .attr('class', 'bubble')
+                    .merge(bubbles)
+                    .attr('cx', d => {
+                        const coords = getCountryCoordinates(d.country);
+                        if (coords && projection) {
+                            try {
+                                const projected = projection(coords);
+                                return projected ? projected[0] : 0;
+                            } catch (e) {
+                                return 0;
+                            }
+                        }
+                        return 0;
+                    })
+                    .attr('cy', d => {
+                        const coords = getCountryCoordinates(d.country);
+                        if (coords && projection) {
+                            try {
+                                const projected = projection(coords);
+                                return projected ? projected[1] : 0;
+                            } catch (e) {
+                                return 0;
+                            }
+                        }
+                        return 0;
+                    })
+                    .attr('r', d => sizeScale(metricType === 'total' ? d.gdp : d.gdp / d.population))
+                    .style('display', d => {
+                        const coords = getCountryCoordinates(d.country);
+                        return coords && projection ? 'block' : 'none';
+                    })
+                    .classed('highlighted', d => selectedCountries.has(d.country))
+                    .classed('dimmed', d => selectedCountries.size > 0 && !selectedCountries.has(d.country));
+                
+                bubbles.exit().remove();
+            }
+        }
+        
+        // 
+        function updateScatterPlot() {
+            const container = d3.select('#scatter-container');
+            const svg = container.property('svg');
+            const g = container.property('g');
+            const margin = container.property('margin');
+            const width = svg.attr('width') - margin.left - margin.right;
+            const height = svg.attr('height') - margin.top - margin.bottom;
+            
+            const yearData = getFilteredData();
+            
+            // 
+            const xScale = d3.scaleLog()
+                .domain(d3.extent(yearData, d => d.gdp / d.population))
+                .range([0, width]);
+            
+            const yScale = d3.scaleLinear()
+                .domain([0, d3.max(yearData, d => d.co2_per_capita)])
+                .range([height, 0]);
+            
+            // 
+            const tickVals = [1000, 2000, 5000, 10000, 20000, 50000, 100000];
+            g.select('.x-axis')
+            .transition()
+            .duration(750)
+            .call(
+                d3.axisBottom(xScale)
+                .tickValues(tickVals)                 // 指定要显示哪些值
+                .tickFormat(d3.format(',.0f'))
+            );
+            
+            g.select('.y-axis')
+                .transition()
+                .duration(750)
+                .call(d3.axisLeft(yScale));
+            
+            // 
+            const colorScale = d3.scaleOrdinal()
+                .domain([true, false])
+                .range(['#3498db', '#e74c3c']);
+            
+            // 
+            const dots = g.selectAll('.scatter-dot')
+                .data(yearData);
+            
+            dots.enter()
+                .append('circle')
+                .attr('class', 'scatter-dot')
+                .attr('r', 5)
+                .merge(dots)
+                .transition()
+                .duration(750)
+                .attr('cx', d => xScale(d.gdp / d.population))
+                .attr('cy', d => yScale(d.co2_per_capita))
+                .attr('fill', d => colorScale(d.isDeveloped))
+                .attr('opacity', 0.7);
+            
+            dots.classed('highlighted', d => selectedCountries.has(d.country))
+                .classed('dimmed', d => selectedCountries.size > 0 && !selectedCountries.has(d.country));
+            
+            // 
+            g.selectAll('.scatter-dot')
+                .on('mouseover', function(event, d) {
+                    showTooltip(event, `
+                        <strong>${d.country}</strong><br>
+                        Type: ${d.isDeveloped ? 'Developed Country' : 'Developing Country'}<br>
+                        Per capita GDP: ${(d.gdp / d.population).toFixed(2)} $<br>
+                        Per capita CO2: ${d.co2_per_capita.toFixed(2)} t
+                    `);
+                })
+                .on('mouseout', hideTooltip)
+                .on('click', function(event, d) {
+                    toggleCountrySelection(d.country);
+                });
+            
+            dots.exit().remove();
+            
+            // 
+            const regression = calculateLinearRegression(yearData.map(d => ({
+                x: Math.log(d.gdp / d.population),
+                y: d.co2_per_capita
+            })));
+            
+            const lineData = [
+                {x: d3.min(yearData, d => d.gdp / d.population), y: regression.predict(Math.log(d3.min(yearData, d => d.gdp / d.population)))},
+                {x: d3.max(yearData, d => d.gdp / d.population), y: regression.predict(Math.log(d3.max(yearData, d => d.gdp / d.population)))}
+            ];
+            
+            const line = d3.line()
+                .x(d => xScale(d.x))
+                .y(d => yScale(d.y));
+            
+            const regressionLine = g.selectAll('.regression-line')
+                .data([lineData]);
+            
+            regressionLine.enter()
+                .append('path')
+                .attr('class', 'regression-line')
+                .merge(regressionLine)
+                .transition()
+                .duration(750)
+                .attr('d', line);
+            
+            // 
+            const legend = g.selectAll('.legend')
+                .data([{text: 'Developed Country', color: '#3498db'}, {text: 'Developing Country', color: '#e74c3c'}]);
+            
+            const legendEnter = legend.enter()
+                .append('g')
+                .attr('class', 'legend');
+            
+            legendEnter.append('circle')
+                .attr('r', 5);
+            
+            legendEnter.append('text')
+                .attr('x', 10)
+                .attr('y', 5);
+            
+            legend.merge(legendEnter)
+                .attr('transform', (d, i) => `translate(${width - 100}, ${20 + i * 20})`)
+                .select('circle')
+                .attr('fill', d => d.color);
+            
+            legend.merge(legendEnter)
+                .select('text')
+                .text(d => d.text);
+        }
+        
+        // 
+        function updateBarChart() {
+            const container = d3.select('#bar-container');
+            const svg = container.property('svg');
+            const g = container.property('g');
+            const margin = container.property('margin');
+            const width = svg.attr('width') - margin.left - margin.right;
+            const height = svg.attr('height') - margin.top - margin.bottom;
+            
+            const yearData = getFilteredData();
+            
+            // 
+            const top10 = yearData
+                .sort((a, b) => b.co2 - a.co2)
+                .slice(0, 10);
+            
+            // 
+            const gdpRanked = yearData
+                .sort((a, b) => b.gdp - a.gdp)
+                .map((d, i) => ({...d, gdpRank: i + 1}));
+            
+            const gdpRankMap = new Map(gdpRanked.map(d => [d.country, d.gdpRank]));
+            
+            top10.forEach(d => {
+                d.gdpRank = gdpRankMap.get(d.country) || 999;
+            });
+            
+            // 
+            const xScale = d3.scaleBand()
+                .domain(top10.map(d => d.country))
+                .range([0, width])
+                .padding(0.2);
+            
+            const yScaleLeft = d3.scaleLinear()
+                .domain([0, d3.max(top10, d => d.co2)])
+                .range([height, 0]);
+            
+            const yScaleRight = d3.scaleLinear()
+                .domain([d3.max(top10, d => d.gdpRank), 1])
+                .range([height, 0]);
+            
+            // 
+            g.select('.x-axis')
+                .transition()
+                .duration(750)
+                .call(d3.axisBottom(xScale))
+                .selectAll('text')
+                .style('text-anchor', 'end')
+                .attr('dx', '-.8em')
+                .attr('dy', '.15em')
+                .attr('transform', 'rotate(-45)');
+            
+            g.select('.y-axis-left')
+                .transition()
+                .duration(750)
+                .call(d3.axisLeft(yScaleLeft));
+            
+            g.select('.y-axis-right')
+                .transition()
+                .duration(750)
+                .call(d3.axisRight(yScaleRight));
+            
+            // 
+            const bars = g.selectAll('.bar')
+                .data(top10);
+            
+            bars.enter()
+                .append('rect')
+                .attr('class', 'bar')
+                .attr('fill', '#3498db')
+                .merge(bars)
+                .transition()
+                .duration(750)
+                .attr('x', d => xScale(d.country))
+                .attr('y', d => yScaleLeft(d.co2))
+                .attr('width', xScale.bandwidth())
+                .attr('height', d => height - yScaleLeft(d.co2));
+            
+            bars.classed('highlighted', d => selectedCountries.has(d.country))
+                .classed('dimmed', d => selectedCountries.size > 0 && !selectedCountries.has(d.country));
+            
+            // 
+            g.selectAll('.bar')
+                .on('mouseover', function(event, d) {
+                    showTooltip(event, `
+                        <strong>${d.country}</strong><br>
+                        CO2 Emission: ${d.co2.toFixed(2)} Mt<br>
+                        GDP ranking: the ${d.gdpRank} th
+                    `);
+                })
+                .on('mouseout', hideTooltip)
+                .on('click', function(event, d) {
+                    toggleCountrySelection(d.country);
+                });
+            
+            bars.exit().remove();
+            
+            // 
+            const line = d3.line()
+                .x(d => xScale(d.country) + xScale.bandwidth() / 2)
+                .y(d => yScaleRight(d.gdpRank));
+            
+            const gdpLine = g.selectAll('.gdp-line')
+                .data([top10]);
+            
+            gdpLine.enter()
+                .append('path')
+                .attr('class', 'gdp-line')
+                .attr('fill', 'none')
+                .attr('stroke', '#e74c3c')
+                .attr('stroke-width', 2)
+                .merge(gdpLine)
+                .transition()
+                .duration(750)
+                .attr('d', line);
+            
+            // 
+            const gdpDots = g.selectAll('.gdp-dot')
+                .data(top10);
+            
+            gdpDots.enter()
+                .append('circle')
+                .attr('class', 'gdp-dot')
+                .attr('r', 4)
+                .attr('fill', '#e74c3c')
+                .merge(gdpDots)
+                .transition()
+                .duration(750)
+                .attr('cx', d => xScale(d.country) + xScale.bandwidth() / 2)
+                .attr('cy', d => yScaleRight(d.gdpRank));
+            
+            gdpDots.exit().remove();
+        }
+        
+        // 
+        function updateBoxPlot() {
+            const container = d3.select('#box-container');
+            const svg = container.property('svg');
+            const g = container.property('g');
+            const margin = container.property('margin');
+            const width = svg.attr('width') - margin.left - margin.right;
+            const height = svg.attr('height') - margin.top - margin.bottom;
+            
+            const yearData = getFilteredData();
+            
+            // 
+            const developedData = yearData.filter(d => d.isDeveloped).map(d => d.co2_per_capita);
+            const developingData = yearData.filter(d => !d.isDeveloped).map(d => d.co2_per_capita);
+            
+            const boxData = [
+                {group: 'Developed Country', values: developedData},
+                {group: 'Developing Country', values: developingData}
+            ];
+            
+            // 
+            boxData.forEach(d => {
+                d.values.sort((a, b) => a - b);
+                d.q1 = d3.quantile(d.values, 0.25);
+                d.median = d3.quantile(d.values, 0.5);
+                d.q3 = d3.quantile(d.values, 0.75);
+                d.iqr = d.q3 - d.q1;
+                d.min = Math.max(d.q1 - 1.5 * d.iqr, d3.min(d.values));
+                d.max = Math.min(d.q3 + 1.5 * d.iqr, d3.max(d.values));
+                d.outliers = d.values.filter(v => v < d.min || v > d.max);
+            });
+            
+            // 
+            const xScale = d3.scaleBand()
+                .domain(boxData.map(d => d.group))
+                .range([0, width])
+                .padding(0.3);
+            
+            const yScale = d3.scaleLinear()
+                .domain([0, d3.max(boxData, d => d3.max(d.values))])
+                .range([height, 0]);
+            
+            // 
+            g.select('.x-axis')
+                .transition()
+                .duration(750)
+                .call(d3.axisBottom(xScale));
+            
+            g.select('.y-axis')
+                .transition()
+                .duration(750)
+                .call(d3.axisLeft(yScale));
+            
+            // 
+            const boxes = g.selectAll('.box')
+                .data(boxData);
+            
+            boxes.enter()
+                .append('rect')
+                .attr('class', 'box')
+                .attr('fill', '#3498db')
+                .attr('opacity', 0.3)
+                .merge(boxes)
+                .transition()
+                .duration(750)
+                .attr('x', d => xScale(d.group))
+                .attr('y', d => yScale(d.q3))
+                .attr('width', xScale.bandwidth())
+                .attr('height', d => yScale(d.q1) - yScale(d.q3));
+            
+            boxes.exit().remove();
+            
+            // 
+            const medianLines = g.selectAll('.median-line')
+                .data(boxData);
+            
+            medianLines.enter()
+                .append('line')
+                .attr('class', 'median-line')
+                .attr('stroke', '#2c3e50')
+                .attr('stroke-width', 2)
+                .merge(medianLines)
+                .transition()
+                .duration(750)
+                .attr('x1', d => xScale(d.group))
+                .attr('x2', d => xScale(d.group) + xScale.bandwidth())
+                .attr('y1', d => yScale(d.median))
+                .attr('y2', d => yScale(d.median));
+            
+            medianLines.exit().remove();
+            
+            // 
+            const whiskers = g.selectAll('.whisker')
+                .data(boxData.flatMap(d => [
+                    {group: d.group, value: d.min, type: 'min'},
+                    {group: d.group, value: d.max, type: 'max'}
+                ]));
+            
+            whiskers.enter()
+                .append('line')
+                .attr('class', 'whisker')
+                .attr('stroke', '#2c3e50')
+                .attr('stroke-width', 1)
+                .merge(whiskers)
+                .transition()
+                .duration(750)
+                .attr('x1', d => xScale(d.group) + xScale.bandwidth() / 2)
+                .attr('x2', d => xScale(d.group) + xScale.bandwidth() / 2)
+                .attr('y1', d => yScale(d.value))
+                .attr('y2', d => {
+                    const boxD = boxData.find(b => b.group === d.group);
+                    return d.type === 'min' ? yScale(boxD.q1) : yScale(boxD.q3);
+                });
+            
+            whiskers.exit().remove();
+            
+            // 
+            const caps = g.selectAll('.cap')
+                .data(boxData.flatMap(d => [
+                    {group: d.group, value: d.min},
+                    {group: d.group, value: d.max}
+                ]));
+            
+            caps.enter()
+                .append('line')
+                .attr('class', 'cap')
+                .attr('stroke', '#2c3e50')
+                .attr('stroke-width', 1)
+                .merge(caps)
+                .transition()
+                .duration(750)
+                .attr('x1', d => xScale(d.group) + xScale.bandwidth() / 4)
+                .attr('x2', d => xScale(d.group) + 3 * xScale.bandwidth() / 4)
+                .attr('y1', d => yScale(d.value))
+                .attr('y2', d => yScale(d.value));
+            
+            caps.exit().remove();
+            
+            // 
+            const outliers = g.selectAll('.outlier')
+                .data(boxData.flatMap(d => 
+                    d.outliers.map(v => ({group: d.group, value: v}))
+                ));
+            
+            outliers.enter()
+                .append('circle')
+                .attr('class', 'outlier')
+                .attr('r', 3)
+                .attr('fill', '#e74c3c')
+                .attr('opacity', 0.6)
+                .merge(outliers)
+                .transition()
+                .duration(750)
+                .attr('cx', d => xScale(d.group) + xScale.bandwidth() / 2)
+                .attr('cy', d => yScale(d.value));
+            
+            outliers.exit().remove();
+            
+            // 
+            g.selectAll('.box')
+                .on('mouseover', function(event, d) {
+                    showTooltip(event, `
+                        <strong>${d.group}</strong><br>
+                        Min: ${d.min.toFixed(2)}<br>
+                        Q1: ${d.q1.toFixed(2)}<br>
+                        Median : ${d.median.toFixed(2)}<br>
+                        Q3: ${d.q3.toFixed(2)}<br>
+                        Max: ${d.max.toFixed(2)}<br>
+                        Outlier : ${d.outliers.length}个
+                    `);
+                })
+                .on('mouseout', hideTooltip);
+        }
+        
+        // 
+        function updateAllCharts() {
+            try {
+                updateWorldMap();
+            } catch (e) {
+                console.error('fail to update world map:', e);
+            }
+            
+            try {
+                updateScatterPlot();
+            } catch (e) {
+                console.error('fail to update scatter:', e);
+            }
+            
+            try {
+                updateBarChart();
+            } catch (e) {
+                console.error('fail to update bar chart:', e);
+            }
+            
+            try {
+                updateBoxPlot();
+            } catch (e) {
+                console.error('fail to update box plot:', e);
+            }
+        }
+        
+        // 
+        function bindControls() {
+            // 
+            d3.select('#year-slider').on('input', function() {
+                currentYear = +this.value;
+                d3.select('#year-display').text(currentYear);
+                updateAllCharts();
+            });
+            
+            // 
+            d3.selectAll('[data-filter]').on('click', function() {
+                d3.selectAll('[data-filter]').classed('active', false);
+                d3.select(this).classed('active', true);
+                countryFilter = this.getAttribute('data-filter');
+                updateAllCharts();
+            });
+            
+            // 
+            d3.selectAll('[data-metric]').on('click', function() {
+                d3.selectAll('[data-metric]').classed('active', false);
+                d3.select(this).classed('active', true);
+                metricType = this.getAttribute('data-metric');
+                updateAllCharts();
+            });
+        }
+        
+        // 
+        function toggleCountrySelection(country) {
+            if (selectedCountries.has(country)) {
+                selectedCountries.delete(country);
+            } else {
+                selectedCountries.add(country);
+            }
+            
+            // 
+            if (selectedCountries.size > 10) {
+                selectedCountries.clear();
+            }
+            
+            updateAllCharts();
+        }
+        
+        // 
+        function calculateLinearRegression(data) {
+            const n = data.length;
+            const sumX = data.reduce((sum, d) => sum + d.x, 0);
+            const sumY = data.reduce((sum, d) => sum + d.y, 0);
+            const sumXY = data.reduce((sum, d) => sum + d.x * d.y, 0);
+            const sumX2 = data.reduce((sum, d) => sum + d.x * d.x, 0);
+            
+            const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+            const intercept = (sumY - slope * sumX) / n;
+            
+            return {
+                slope,
+                intercept,
+                predict: (x) => slope * x + intercept
+            };
+        }
+        
+        // 
+        function getCountryCoordinates(country) {
+            const coords = {
+                'United States': [-95, 38],
+                'China': [105, 35],
+                'India': [77, 20],
+                'Germany': [10, 51],
+                'Japan': [138, 36],
+                'United Kingdom': [-3, 54],
+                'France': [2, 46],
+                'Russia': [105, 60],
+                'Brazil': [-55, -10],
+                'Canada': [-95, 60],
+                'Australia': [133, -27],
+                'South Korea': [127, 37],
+                'Mexico': [-102, 23],
+                'Indonesia': [120, -5],
+                'Saudi Arabia': [45, 24],
+                'South Africa': [24, -29],
+                'Turkey': [35, 39],
+                'Argentina': [-64, -34],
+                'Italy': [12, 42],
+                'Spain': [-4, 40]
+            };
+            
+            return coords[country] || null;
+        }
+        
+        // 
+        function showTooltip(event, content) {
+            const tooltip = d3.select('.tooltip');
+            tooltip.html(content)
+                .style('left', (event.pageX + 10) + 'px')
+                .style('top', (event.pageY - 10) + 'px')
+                .style('opacity', 1);
+        }
+        
+        // 
+        function hideTooltip() {
+            d3.select('.tooltip').style('opacity', 0);
+        }
+        
+        // 
+        loadData();
+    </script>
+</body>
+</html>
